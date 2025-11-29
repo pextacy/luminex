@@ -1,0 +1,18 @@
+{
+  "name": "luminex-contracts",
+  "version": "1.0.0",
+  "description": "Luminex Smart Contracts for Somnia",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "coverage": "hardhat coverage",
+    "deploy:somnia": "hardhat run scripts/deploy.js --network somnia",
+    "deploy:local": "hardhat run scripts/deploy.js --network hardhat",
+    "verify": "hardhat verify --network somnia"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@openzeppelin/contracts": "^5.0.1",
+    "hardhat": "^2.19.4"
+  }
+}

@@ -1,0 +1,396 @@
+// This is your Prisma schema file for Luminex Backend
+// Learn more about it at https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// CAMPAIGN MODELS
+// ==========================================
+
+model Campaign {
+  id              String       @id @default(cuid())
+  onChainId       String       @unique @map("on_chain_id")
+  title           String
+  description     String       @db.Text
+  category        Category     @relation(fields: [categoryId], references: [id])
+  categoryId      String       @map("category_id")
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  organizationId  String       @map("organization_id")
+  
+  targetAmount    Decimal      @db.Decimal(78, 0) @map("target_amount") // Wei amount
+  currentAmount   Decimal      @default(0) @db.Decimal(78, 0) @map("current_amount")
+  donorCount      Int          @default(0) @map("donor_count")
+  
+  imageUrl        String?      @map("image_url")
+  bannerUrl       String?      @map("banner_url")
+  
+  sdsStreamId     String       @unique @map("sds_stream_id") // e.g., luminex.earthquake-jp
+  
+  status          CampaignStatus @default(ACTIVE)
+  isVerified      Boolean      @default(false) @map("is_verified")
+  isFeatured      Boolean      @default(false) @map("is_featured")
+  
+  startDate       DateTime     @map("start_date")
+  endDate         DateTime?    @map("end_date")
+  
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  
+  donations       Donation[]
+  withdrawals     Withdrawal[]
+  
+  @@index([categoryId])
+  @@index([organizationId])
+  @@index([status])
+  @@index([isFeatured])
+  @@index([createdAt])
+  @@map("campaigns")
+}
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+// ==========================================
+// CATEGORY MODEL
+// ==========================================
+
+model Category {
+  id          String     @id @default(cuid())
+  name        String     @unique
+  slug        String     @unique
+  description String?
+  icon        String?
+  color       String?    // Hex color for UI
+  
+  isActive    Boolean    @default(true) @map("is_active")
+  sortOrder   Int        @default(0) @map("sort_order")
+  
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+  
+  campaigns   Campaign[]
+  
+  @@map("categories")
+}
+
+// ==========================================
+// DONATION MODELS
+// ==========================================
+
+model Donation {
+  id              String          @id @default(cuid())
+  txHash          String          @unique @map("tx_hash")
+  
+  campaign        Campaign        @relation(fields: [campaignId], references: [id])
+  campaignId      String          @map("campaign_id")
+  
+  donorAddress    String          @map("donor_address")
+  donor           Donor?          @relation(fields: [donorAddress], references: [address])
+  
+  amount          Decimal         @db.Decimal(78, 0) // Wei amount
+  amountUsd       Decimal?        @db.Decimal(18, 2) @map("amount_usd") // Optional USD equivalent
+  
+  message         String?         @db.Text
+  isAnonymous     Boolean         @default(false) @map("is_anonymous")
+  
+  // SDS Event Data
+  sdsEventId      String?         @unique @map("sds_event_id")
+  sdsReceivedAt   DateTime?       @map("sds_received_at")
+  
+  // On-chain confirmation
+  status          DonationStatus  @default(PENDING)
+  blockNumber     BigInt?         @map("block_number")
+  blockTimestamp  DateTime?       @map("block_timestamp")
+  confirmedAt     DateTime?       @map("confirmed_at")
+  
+  // Gas info
+  gasUsed         BigInt?         @map("gas_used")
+  gasPrice        BigInt?         @map("gas_price")
+  
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+  
+  @@index([campaignId])
+  @@index([donorAddress])
+  @@index([status])
+  @@index([createdAt])
+  @@index([blockNumber])
+  @@map("donations")
+}
+
+enum DonationStatus {
+  PENDING     // Received via SDS, awaiting on-chain confirmation
+  CONFIRMED   // Confirmed on-chain
+  FAILED      // Transaction failed
+  ORPHANED    // SDS event without matching on-chain tx after timeout
+}
+
+// ==========================================
+// DONOR MODEL (Aggregated donor data)
+// ==========================================
+
+model Donor {
+  address         String      @id
+  
+  totalDonated    Decimal     @default(0) @db.Decimal(78, 0) @map("total_donated")
+  donationCount   Int         @default(0) @map("donation_count")
+  campaignCount   Int         @default(0) @map("campaign_count")
+  
+  // Optional profile info (if they connect wallet and set)
+  displayName     String?     @map("display_name")
+  avatarUrl       String?     @map("avatar_url")
+  
+  firstDonationAt DateTime?   @map("first_donation_at")
+  lastDonationAt  DateTime?   @map("last_donation_at")
+  
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+  
+  donations       Donation[]
+  
+  @@index([totalDonated(sort: Desc)])
+  @@map("donors")
+}
+
+// ==========================================
+// ORGANIZATION MODEL
+// ==========================================
+
+model Organization {
+  id              String     @id @default(cuid())
+  name            String
+  slug            String     @unique
+  description     String?    @db.Text
+  
+  walletAddress   String     @unique @map("wallet_address")
+  
+  logoUrl         String?    @map("logo_url")
+  websiteUrl      String?    @map("website_url")
+  
+  isVerified      Boolean    @default(false) @map("is_verified")
+  verifiedAt      DateTime?  @map("verified_at")
+  
+  // Contact info
+  email           String?
+  country         String?
+  
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+  
+  campaigns       Campaign[]
+  withdrawals     Withdrawal[]
+  adminUsers      AdminUser[]
+  
+  @@map("organizations")
+}
+
+// ==========================================
+// WITHDRAWAL MODEL
+// ==========================================
+
+model Withdrawal {
+  id              String            @id @default(cuid())
+  txHash          String?           @unique @map("tx_hash")
+  
+  campaign        Campaign          @relation(fields: [campaignId], references: [id])
+  campaignId      String            @map("campaign_id")
+  
+  organization    Organization      @relation(fields: [organizationId], references: [id])
+  organizationId  String            @map("organization_id")
+  
+  amount          Decimal           @db.Decimal(78, 0)
+  toAddress       String            @map("to_address")
+  
+  status          WithdrawalStatus  @default(PENDING)
+  
+  requestedBy     AdminUser         @relation(fields: [requestedById], references: [id])
+  requestedById   String            @map("requested_by_id")
+  requestedAt     DateTime          @default(now()) @map("requested_at")
+  
+  processedAt     DateTime?         @map("processed_at")
+  blockNumber     BigInt?           @map("block_number")
+  
+  notes           String?           @db.Text
+  
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+  
+  @@index([campaignId])
+  @@index([organizationId])
+  @@index([status])
+  @@map("withdrawals")
+}
+
+enum WithdrawalStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+// ==========================================
+// ADMIN & AUTH MODELS
+// ==========================================
+
+model AdminUser {
+  id              String        @id @default(cuid())
+  email           String        @unique
+  passwordHash    String        @map("password_hash")
+  
+  walletAddress   String?       @unique @map("wallet_address")
+  
+  firstName       String?       @map("first_name")
+  lastName        String?       @map("last_name")
+  
+  role            AdminRole     @default(VIEWER)
+  
+  organization    Organization? @relation(fields: [organizationId], references: [id])
+  organizationId  String?       @map("organization_id")
+  
+  isActive        Boolean       @default(true) @map("is_active")
+  lastLoginAt     DateTime?     @map("last_login_at")
+  
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  
+  withdrawals     Withdrawal[]
+  auditLogs       AuditLog[]
+  apiKeys         ApiKey[]
+  
+  @@index([organizationId])
+  @@map("admin_users")
+}
+
+enum AdminRole {
+  SUPER_ADMIN   // Full system access
+  ORG_ADMIN     // Organization admin - can manage campaigns, withdrawals
+  ORG_MANAGER   // Can manage campaigns but not withdrawals
+  VIEWER        // Read-only access
+}
+
+model ApiKey {
+  id          String      @id @default(cuid())
+  keyHash     String      @unique @map("key_hash")
+  name        String
+  
+  adminUser   AdminUser   @relation(fields: [adminUserId], references: [id])
+  adminUserId String      @map("admin_user_id")
+  
+  permissions String[]    // Array of permission strings
+  
+  isActive    Boolean     @default(true) @map("is_active")
+  expiresAt   DateTime?   @map("expires_at")
+  lastUsedAt  DateTime?   @map("last_used_at")
+  
+  createdAt   DateTime    @default(now()) @map("created_at")
+  
+  @@index([adminUserId])
+  @@map("api_keys")
+}
+
+// ==========================================
+// AUDIT & MONITORING MODELS
+// ==========================================
+
+model AuditLog {
+  id          String      @id @default(cuid())
+  
+  action      String      // e.g., "campaign.create", "withdrawal.request"
+  entityType  String      @map("entity_type") // e.g., "campaign", "donation"
+  entityId    String?     @map("entity_id")
+  
+  adminUser   AdminUser?  @relation(fields: [adminUserId], references: [id])
+  adminUserId String?     @map("admin_user_id")
+  
+  ipAddress   String?     @map("ip_address")
+  userAgent   String?     @map("user_agent")
+  
+  oldValue    Json?       @map("old_value")
+  newValue    Json?       @map("new_value")
+  metadata    Json?
+  
+  createdAt   DateTime    @default(now()) @map("created_at")
+  
+  @@index([action])
+  @@index([entityType, entityId])
+  @@index([adminUserId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model SdsEvent {
+  id              String        @id @default(cuid())
+  eventId         String        @unique @map("event_id") // Original SDS event ID
+  streamId        String        @map("stream_id")
+  
+  eventType       String        @map("event_type") // donation, campaign_update, etc.
+  payload         Json
+  
+  processedAt     DateTime?     @map("processed_at")
+  processingError String?       @map("processing_error")
+  
+  retryCount      Int           @default(0) @map("retry_count")
+  
+  receivedAt      DateTime      @default(now()) @map("received_at")
+  
+  @@index([streamId])
+  @@index([eventType])
+  @@index([processedAt])
+  @@map("sds_events")
+}
+
+// ==========================================
+// ANALYTICS MODELS (Denormalized for speed)
+// ==========================================
+
+model CampaignStats {
+  id              String    @id @default(cuid())
+  campaignId      String    @unique @map("campaign_id")
+  
+  // Time-series stats
+  date            DateTime  @db.Date
+  
+  donationCount   Int       @default(0) @map("donation_count")
+  donorCount      Int       @default(0) @map("donor_count")
+  totalAmount     Decimal   @default(0) @db.Decimal(78, 0) @map("total_amount")
+  
+  // Unique donors for the day
+  uniqueDonors    String[]  @map("unique_donors")
+  
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  
+  @@unique([campaignId, date])
+  @@index([date])
+  @@map("campaign_stats")
+}
+
+model GlobalStats {
+  id                  String    @id @default(cuid())
+  date                DateTime  @unique @db.Date
+  
+  totalDonations      Int       @default(0) @map("total_donations")
+  totalDonors         Int       @default(0) @map("total_donors")
+  totalAmountWei      Decimal   @default(0) @db.Decimal(78, 0) @map("total_amount_wei")
+  
+  activeCampaigns     Int       @default(0) @map("active_campaigns")
+  completedCampaigns  Int       @default(0) @map("completed_campaigns")
+  
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+  
+  @@map("global_stats")
+}
